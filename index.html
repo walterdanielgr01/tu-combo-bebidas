@@ -660,6 +660,29 @@
   }
   .info-field.error .err-msg{ display:block; }
 
+  .delivery-block{ margin-top:4px; }
+  .pay-opt.disabled{
+    opacity:.35; cursor:not-allowed;
+  }
+  .pay-note{
+    margin-top:8px; font-family:'Inter'; font-size:12px;
+    color:var(--gold-soft);
+  }
+
+  .club-block{ margin-top:16px; }
+  .club-note{
+    margin-top:8px; font-family:'Inter'; font-size:12px;
+    color:var(--inkdim); line-height:1.4;
+  }
+  .club-note.active{ color:var(--gold-soft); }
+  .cart-summary{ margin-top:16px; padding-top:14px; border-top:1px solid var(--line); }
+  .summary-row{
+    display:flex; align-items:center; justify-content:space-between;
+    font-family:'JetBrains Mono', monospace; font-size:13px; color:var(--inkdim);
+    padding:3px 0;
+  }
+  .summary-row#summaryDiscountRow{ color:#7fd48a; }
+
   .pay-block{ margin-top:16px; }
   .pay-title{
     font-family:'Inter'; font-weight:700; font-size:13px;
@@ -678,7 +701,7 @@
 
   .cart-total-row{
     display:flex; align-items:center; justify-content:space-between;
-    margin-top:16px; padding-top:14px; border-top:1px solid var(--line);
+    margin-top:6px; padding-top:8px;
     font-family:'Inter'; font-weight:700; font-size:16px;
   }
   .cart-total-row .amt{
@@ -714,6 +737,18 @@
     </div>
     <div id="cartLines"><div class="cart-empty">Todavía no agregaste productos.</div></div>
 
+    <div class="delivery-block" id="deliveryBlock" style="display:none;">
+      <div class="pay-title">Tipo de entrega</div>
+      <div class="pay-opts">
+        <label class="pay-opt active" id="deliveryLbl">
+          <input type="radio" name="deliveryType" value="Delivery" checked> 🛵 Delivery
+        </label>
+        <label class="pay-opt" id="pickupLbl">
+          <input type="radio" name="deliveryType" value="Retiro en el local"> 🏬 Retiro en el local
+        </label>
+      </div>
+    </div>
+
     <div class="info-block" id="infoBlock" style="display:none;">
       <div class="info-field" id="nameField">
         <label for="custName">Nombre</label>
@@ -727,6 +762,14 @@
       </div>
     </div>
 
+    <div class="club-block" id="clubBlock" style="display:none;">
+      <div class="pay-title">Club de descuentos (opcional)</div>
+      <div class="info-field" id="clubField">
+        <input type="text" id="custClub" placeholder="Número de socio">
+      </div>
+      <div class="club-note" id="clubNote">💳 Ingresá tu número de socio para obtener 5% de descuento y sumar puntos club.</div>
+    </div>
+
     <div class="pay-block" id="payBlock" style="display:none;">
       <div class="pay-title">Forma de pago</div>
       <div class="pay-opts">
@@ -737,11 +780,22 @@
           <input type="radio" name="payMethod" value="Efectivo"> Efectivo
         </label>
       </div>
+      <div class="pay-note" id="payNote" style="display:none;">🛵 Para delivery, el pago es únicamente por transferencia.</div>
     </div>
 
-    <div class="cart-total-row" id="cartTotalRow" style="display:none;">
-      <span>Total</span>
-      <span class="amt" id="cartTotalAmt">$0</span>
+    <div class="cart-summary" id="cartSummary" style="display:none;">
+      <div class="summary-row">
+        <span>Subtotal</span>
+        <span id="summarySubtotal">$0</span>
+      </div>
+      <div class="summary-row" id="summaryDiscountRow" style="display:none;">
+        <span>Descuento socio (5%)</span>
+        <span id="summaryDiscount">-$0</span>
+      </div>
+      <div class="cart-total-row">
+        <span>Total</span>
+        <span class="amt" id="cartTotalAmt">$0</span>
+      </div>
     </div>
 
     <div class="cart-actions" id="cartActions" style="display:none;">
@@ -757,6 +811,10 @@
   var WHATSAPP_NUMBER = "5491139521822";
 
   var cart = {}; // id -> {name, price, qty}
+
+  // ⚙️ Configuración del club de descuentos
+  var CLUB_DISCOUNT_RATE = 0.05;   // 5% de descuento
+  var CLUB_POINTS_PER = 100;       // 1 punto club cada $100 de compra
 
   function parsePrice(text){
     var digits = text.replace(/[^0-9]/g, '');
@@ -855,6 +913,24 @@
     return { count: count, total: total };
   }
 
+  function computeOrderSummary(){
+    var t = cartTotals();
+    var clubNumber = custClub ? custClub.value.trim() : '';
+    var hasClub = clubNumber.length > 0;
+    var discount = hasClub ? Math.round(t.total * CLUB_DISCOUNT_RATE) : 0;
+    var total = t.total - discount;
+    var points = Math.floor(t.total / CLUB_POINTS_PER);
+    return {
+      count: t.count,
+      subtotal: t.total,
+      hasClub: hasClub,
+      clubNumber: clubNumber,
+      discount: discount,
+      total: total,
+      points: points
+    };
+  }
+
   var fab = document.getElementById('cartFab');
   var fabBadge = document.getElementById('fabBadge');
   var fabLabel = document.getElementById('fabLabel');
@@ -869,13 +945,23 @@
 
   var overlay = document.getElementById('cartOverlay');
   var cartLines = document.getElementById('cartLines');
+  var deliveryBlock = document.getElementById('deliveryBlock');
+  var deliveryLbl = document.getElementById('deliveryLbl');
+  var pickupLbl = document.getElementById('pickupLbl');
+  var payNote = document.getElementById('payNote');
   var infoBlock = document.getElementById('infoBlock');
   var custName = document.getElementById('custName');
   var custAddress = document.getElementById('custAddress');
   var nameField = document.getElementById('nameField');
   var addressField = document.getElementById('addressField');
   var payBlock = document.getElementById('payBlock');
-  var cartTotalRow = document.getElementById('cartTotalRow');
+  var clubBlock = document.getElementById('clubBlock');
+  var custClub = document.getElementById('custClub');
+  var clubNote = document.getElementById('clubNote');
+  var cartSummary = document.getElementById('cartSummary');
+  var summarySubtotal = document.getElementById('summarySubtotal');
+  var summaryDiscountRow = document.getElementById('summaryDiscountRow');
+  var summaryDiscount = document.getElementById('summaryDiscount');
   var cartActions = document.getElementById('cartActions');
   var cartTotalAmt = document.getElementById('cartTotalAmt');
   var btnWhatsapp = document.getElementById('btnWhatsapp');
@@ -888,22 +974,24 @@
     if(ids.length === 0){
       cartLines.innerHTML = '<div class="cart-empty">Todavía no agregaste productos.</div>';
       infoBlock.style.display = 'none';
+      deliveryBlock.style.display = 'none';
+      clubBlock.style.display = 'none';
       payBlock.style.display = 'none';
-      cartTotalRow.style.display = 'none';
+      cartSummary.style.display = 'none';
       cartActions.style.display = 'none';
       return;
     }
     infoBlock.style.display = 'flex';
+    deliveryBlock.style.display = 'block';
+    clubBlock.style.display = 'block';
     payBlock.style.display = 'block';
-    cartTotalRow.style.display = 'flex';
+    cartSummary.style.display = 'block';
     cartActions.style.display = 'flex';
 
     cartLines.innerHTML = '';
-    var total = 0;
     ids.forEach(function(id){
       var line = cart[id];
       var subtotal = line.qty * line.price;
-      total += subtotal;
 
       var row = document.createElement('div');
       row.className = 'cart-line';
@@ -939,7 +1027,55 @@
       cartLines.appendChild(row);
     });
 
-    cartTotalAmt.textContent = formatPrice(total);
+    updateSummary();
+    applyDeliveryType();
+  }
+
+  function updateSummary(){
+    var s = computeOrderSummary();
+    summarySubtotal.textContent = formatPrice(s.subtotal);
+
+    if(s.hasClub){
+      summaryDiscountRow.style.display = 'flex';
+      summaryDiscount.textContent = '-' + formatPrice(s.discount);
+      clubNote.classList.add('active');
+      clubNote.textContent = '🎉 Descuento del 5% aplicado. Sumás ' + s.points + ' puntos club para merchandising gratis.';
+    } else {
+      summaryDiscountRow.style.display = 'none';
+      clubNote.classList.remove('active');
+      clubNote.textContent = '💳 Ingresá tu número de socio para obtener 5% de descuento y sumar puntos club.';
+    }
+
+    cartTotalAmt.textContent = formatPrice(s.total);
+  }
+
+  function applyDeliveryType(){
+    var deliveryType = document.querySelector('input[name="deliveryType"]:checked').value;
+    var isDelivery = deliveryType === 'Delivery';
+
+    // Mostrar/ocultar dirección según tipo de entrega
+    addressField.style.display = isDelivery ? 'block' : 'none';
+    if(!isDelivery){
+      addressField.classList.remove('error');
+    }
+
+    // Restringir forma de pago si es delivery
+    var cashRadio = document.querySelector('input[name="payMethod"][value="Efectivo"]');
+    var transferRadio = document.querySelector('input[name="payMethod"][value="Transferencia"]');
+
+    if(isDelivery){
+      cashRadio.disabled = true;
+      cashRadio.checked = false;
+      transferRadio.checked = true;
+      payCashLbl.classList.add('disabled');
+      payCashLbl.classList.remove('active');
+      payTransferLbl.classList.add('active');
+      payNote.style.display = 'block';
+    } else {
+      cashRadio.disabled = false;
+      payCashLbl.classList.remove('disabled');
+      payNote.style.display = 'none';
+    }
   }
 
   function findItemById(id){
@@ -965,6 +1101,7 @@
       var item = findItemById(id);
       if(item && item.__renderCtl) item.__renderCtl();
     });
+    custClub.value = '';
     updateFab();
     renderCartPanel();
   });
@@ -976,9 +1113,20 @@
     });
   });
 
+  document.querySelectorAll('input[name="deliveryType"]').forEach(function(radio){
+    radio.addEventListener('change', function(){
+      deliveryLbl.classList.toggle('active', radio.value === 'Delivery' && radio.checked);
+      pickupLbl.classList.toggle('active', radio.value === 'Retiro en el local' && radio.checked);
+      applyDeliveryType();
+    });
+  });
+
   btnWhatsapp.addEventListener('click', function(){
-    var t = cartTotals();
-    if(t.count === 0) return;
+    var s = computeOrderSummary();
+    if(s.count === 0) return;
+
+    var deliveryType = document.querySelector('input[name="deliveryType"]:checked').value;
+    var isDelivery = deliveryType === 'Delivery';
 
     var nameVal = custName.value.trim();
     var addressVal = custAddress.value.trim();
@@ -990,7 +1138,7 @@
     } else {
       nameField.classList.remove('error');
     }
-    if(!addressVal){
+    if(isDelivery && !addressVal){
       addressField.classList.add('error');
       valid = false;
     } else {
@@ -1006,14 +1154,26 @@
     var lines = ['🛒 *Pedido - Tu Combo Bebidas*', ''];
     Object.keys(cart).forEach(function(id){
       var l = cart[id];
-      lines.push('• ' + l.name + '  x' + l.qty + '  —  ' + formatPrice(l.qty * l.price));
+      lines.push(l.qty + 'x  ' + l.name + '  —  ' + formatPrice(l.qty * l.price));
     });
     lines.push('');
-    lines.push('*Total: ' + formatPrice(t.total) + '*');
+    if(s.hasClub){
+      lines.push('Subtotal: ' + formatPrice(s.subtotal));
+      lines.push('Descuento socio (5%): -' + formatPrice(s.discount));
+    }
+    lines.push('*Total: ' + formatPrice(s.total) + '*');
+    lines.push((isDelivery ? '🛵 Entrega: Delivery' : '🏬 Entrega: Retiro en el local'));
     lines.push('💳 Forma de pago: ' + payMethod);
     lines.push('');
     lines.push('👤 Nombre: ' + nameVal);
-    lines.push('📍 Dirección de entrega: ' + addressVal);
+    if(isDelivery){
+      lines.push('📍 Dirección de entrega: ' + addressVal);
+    }
+    if(s.hasClub){
+      lines.push('');
+      lines.push('🎟️ N° de socio: ' + s.clubNumber);
+      lines.push('🎁 Puntos club sumados: ' + s.points);
+    }
 
     var msg = encodeURIComponent(lines.join('\n'));
     var url = 'https://wa.me/' + WHATSAPP_NUMBER + '?text=' + msg;
@@ -1024,6 +1184,10 @@
     input.addEventListener('input', function(){
       input.closest('.info-field').classList.remove('error');
     });
+  });
+
+  custClub.addEventListener('input', function(){
+    updateSummary();
   });
 
   setupItems();
